@@ -21,14 +21,18 @@ def compute_psnr(mse):
 
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
+    if isinstance(covmean, tuple):
+        covmean = covmean[0]
     if not np.isfinite(covmean).all():
         offset = np.eye(sigma1.shape[0]) * eps
         covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+        if isinstance(covmean, tuple):
+            covmean = covmean[0]
     if np.iscomplexobj(covmean):
         covmean = covmean.real
     tr_covmean = np.trace(covmean)
-    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
+    return float(diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean)
 
 def run_evaluation_and_figures(device="cuda" if torch.cuda.is_available() else "cpu"):
     print(f"Device: {device}")
@@ -107,7 +111,7 @@ def run_evaluation_and_figures(device="cuda" if torch.cuda.is_available() else "
     lat_vae_gen = measure_latency(vae.decode, dummy_z64)
     lat_vgan = measure_latency(v_netG, dummy_z64)
     lat_dcgan = measure_latency(dc_netG, dummy_z100)
-    lat_ddpm = measure_latency(ddpm.sample, (64, 1, 28, 28), runs=3)
+    lat_ddpm = measure_latency(ddpm.sample, (64, 1, 28, 28), warmups=0, runs=1)
 
     print("Evaluasi metrik rekonstruksi test set...")
     def eval_recon(model, is_vae=False):
@@ -150,10 +154,10 @@ def run_evaluation_and_figures(device="cuda" if torch.cuda.is_available() else "
         mu_fake, sigma_fake = np.mean(feats, axis=0), np.cov(feats, rowvar=False)
         return compute_frechet_distance(mu_real, sigma_real, mu_fake, sigma_fake)
 
-    fid_vae = eval_fid(vae.decode, latent_dim=64)
-    fid_vgan = eval_fid(v_netG, latent_dim=64)
-    fid_dcgan = eval_fid(dc_netG, latent_dim=100)
-    fid_ddpm = eval_fid(ddpm.sample, is_ddpm=True)
+    fid_vae = eval_fid(vae.decode, latent_dim=64, num_samples=500)
+    fid_vgan = eval_fid(v_netG, latent_dim=64, num_samples=500)
+    fid_dcgan = eval_fid(dc_netG, latent_dim=100, num_samples=500)
+    fid_ddpm = eval_fid(ddpm.sample, is_ddpm=True, num_samples=100)
 
     table_data = [
         {"Model": "Vanilla Autoencoder", "Dim Laten": "64", "Train Time/Epoch (s)": round(history.get("vanilla_ae", {}).get("avg_time_epoch", 0.0), 2), "Latency (ms/64)": round(lat_vae, 2), "MSE": round(ae_mse, 5), "PSNR": round(ae_psnr, 2), "SSIM": round(ae_ssim, 4), "FID": "N/A (Latent Voids)", "Kestabilan": "Stabil / Konvergen"},
